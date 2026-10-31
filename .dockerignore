@@ -1,0 +1,10 @@
+.git
+.venv
+__pycache__
+.pytest_cache
+.env
+*.pyc
+data/*.db
+data/*.sqlite*
+artifacts/models/*
+artifacts/mlflow/*

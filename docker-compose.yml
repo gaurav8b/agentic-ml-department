@@ -1,0 +1,83 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-business_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-business_ai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-local-only}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-business_ai} -d ${POSTGRES_DB:-business_ai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  mlflow:
+    build: .
+    command: >
+      sh -c "mlflow db upgrade \"$$DATABASE_URL\" &&
+      mlflow server --backend-store-uri \"$$DATABASE_URL\"
+      --default-artifact-root /app/artifacts/mlflow
+      --allowed-hosts \"mlflow:5000,localhost:5000,localhost:*,127.0.0.1:5000\"
+      --host 0.0.0.0 --port 5000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://business_ai:change-me-local-only@db:5432/business_ai}
+    volumes:
+      - ./artifacts:/app/artifacts
+    ports:
+      - "5000:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build: .
+    command: ["uvicorn", "agentic_ml_department.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://business_ai:change-me-local-only@db:5432/business_ai}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      LANGGRAPH_CHECKPOINT_PATH: /app/data/checkpoints.sqlite
+      MODEL_ARTIFACT_DIR: /app/artifacts/models
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  dashboard:
+    build: .
+    command: ["streamlit", "run", "dashboard/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    environment:
+      API_BASE_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
