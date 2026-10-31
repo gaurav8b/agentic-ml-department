@@ -6,6 +6,8 @@ on:
     paths:
       - ".github/workflows/publish-readable-source.yml"
       - ".source/agentic-ml-department-source.tar.xz"
+      - ".source/chunks/**"
+      - "CHECKSUMS.txt"
   workflow_dispatch:
 
 permissions:
@@ -20,17 +22,25 @@ jobs:
         with:
           persist-credentials: true
 
-      - name: Verify and expand the committed source snapshot
+      - name: Reconstruct, verify and expand source archive
         shell: bash
         run: |
           set -euo pipefail
+          if [ -d .source/chunks ]; then
+            cat .source/chunks/part-*.b64 | base64 --decode > .source/agentic-ml-department-source.tar.xz
+            rm -rf .source/chunks
+          fi
           sha256sum -c CHECKSUMS.txt
           temp_dir="$(mktemp -d)"
           tar -xJf .source/agentic-ml-department-source.tar.xz -C "$temp_dir"
-          source_dir="$temp_dir/agentic-ml-department"
-          test -d "$source_dir/src"
-          test -d "$source_dir/tests"
-          test -f "$source_dir/docker-compose.yml"
+          if [ -d "$temp_dir/agentic-ml-department/src" ]; then
+            source_dir="$temp_dir/agentic-ml-department"
+          elif [ -d "$temp_dir/src" ]; then
+            source_dir="$temp_dir"
+          else
+            echo "Archive does not contain the expected Python source tree."
+            exit 1
+          fi
           for directory in src tests dashboard scripts docs; do
             test -d "$source_dir/$directory"
             rm -rf "$directory"
@@ -60,7 +70,7 @@ jobs:
           python -m compileall -q src tests dashboard scripts
           pytest -q
 
-      - name: Commit readable project files
+      - name: Commit readable project files and refreshed source archive
         shell: bash
         run: |
           set -euo pipefail
@@ -68,10 +78,10 @@ jobs:
           find src tests dashboard scripts -type d -name __pycache__ -prune -exec rm -rf {} +
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md .env.example Dockerfile docker-compose.yml pyproject.toml requirements.txt Makefile LICENSE .gitignore .dockerignore src tests dashboard scripts docs
+          git add README.md .env.example Dockerfile docker-compose.yml pyproject.toml requirements.txt Makefile LICENSE .gitignore .dockerignore src tests dashboard scripts docs .source CHECKSUMS.txt
           if git diff --cached --quiet; then
             echo "The source tree is already published."
           else
-            git commit -m "Publish readable Python source tree and POC runbook"
+            git commit -m "Publish complete readable Python source tree and POC runbook"
             git push origin HEAD:main
           fi
