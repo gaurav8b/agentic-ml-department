@@ -1,10 +1,9 @@
-# Source archive
+# Source snapshot and publication
 
-The complete project source and all documentation are stored in `agentic-ml-department-source.tar.xz`.
+The compressed archive is a reproducible backup of the complete application source.
 
-The repository-root extraction helpers verify its SHA-256 checksum before extracting:
+The GitHub Actions workflow `.github/workflows/publish-readable-source.yml` reconstructs the archive from the temporary base64 shards, verifies it against `CHECKSUMS.txt`, expands the project into ordinary repository paths, runs Python compilation and tests, and commits the readable source tree to `main`.
 
-- Linux/macOS: `bash extract-source.sh`
-- Windows PowerShell: `.\extract-source.ps1`
+The normal source tree is the primary browsing and development interface. The archive is retained only as a checksum-verified backup.
 
-The resulting project folder is `agentic-ml-department/`. Run Docker Compose from that folder.
+For a local manual extraction, use `extract-source.sh` on Linux/macOS or `extract-source.ps1` on Windows. See `docs/MAKE_THE_POC_LIVE.md` for the full demonstration runbook.
