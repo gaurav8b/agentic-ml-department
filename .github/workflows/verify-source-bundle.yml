@@ -1,0 +1,34 @@
+name: Verify source bundle
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct source archive
+        run: |
+          test "$(find .source/parts -maxdepth 1 -name '*.b64' | wc -l)" -eq 14
+          cat .source/parts/*.b64 | tr -d '\r\n ' | base64 -d > .source/agentic-ml-department-source.tar.xz
+          sha256sum -c CHECKSUMS.txt
+      - name: Extract project
+        run: tar -xJf .source/agentic-ml-department-source.tar.xz
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        working-directory: agentic-ml-department
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+      - name: Compile Python sources
+        working-directory: agentic-ml-department
+        run: python -m compileall -q src tests dashboard scripts
+      - name: Run tests
+        working-directory: agentic-ml-department
+        run: pytest -q
