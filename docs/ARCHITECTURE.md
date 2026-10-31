@@ -60,22 +60,43 @@ A language model should not be trusted to remember whether an approval was given
 
 The official LangGraph documentation describes it as a low-level orchestration framework for long-running, stateful workflows and highlights persistence, durable execution and human-in-the-loop operation. See [LangGraph overview](https://docs.langchain.com/oss/python/langgraph/overview) and [interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts).
 
-## 4. LangGraph lifecycle in this code
+## 4. Specialist-agent design, inspired by MLZero
+
+The project now separates several responsibilities into focused Python agents. This borrows the useful role decomposition used by AutoGluon Assistant / MLZero (data perception, task description, tool selection, coding/execution and error/review roles) without copying its research implementation or allowing unrestricted generated-code execution.
+
+| Specialist | Python entry point | Responsibility | Execution boundary |
+|---|---|---|---|
+| Data perception | `agents.run_data_perception` | Summarize schema, missingness, duplicates, distributions and association warnings | Read-only summaries |
+| Task descriptor | `agents.run_task_planner` | Convert the selected business objective and supervisor instruction into a bounded plan | Produces a plan; does not execute code |
+| Tool selector | `agents.run_tool_selector` | Choose from registered tools based on objective | Can only select tools in `tool_registry.py` |
+| Business question adviser | `advisor.build_business_questions` | Propose measurable business questions and context | Optional LangChain/Ollama advice; human approves |
+| ML execution | `_train` / `modeling.train_and_score` | Run fixed, tested model pipelines | No arbitrary code generation or shell execution |
+| Model reviewer | `agents.run_reviewer` | Check holdout rows, training/scoring separation, artifact reference and quality gate | Provides review evidence; human still approves model promotion |
+| Business integration | `sync_predictions` | Mark approved scores synchronized | Tool registry requires explicit approval |
+| Business feedback | `api.record_outcome` | Capture verified outcomes for future model training | Accepts only an eligible previously synchronized prediction |
+
+The registry is intentionally a capability boundary, not just a list of prompts. Each tool has a name, description, risk label, declared input fields and an approval requirement. Unknown tools are rejected; invalid arguments are rejected; write tools raise `PermissionError` unless the caller passes an explicit approval flag. The workflow uses separate LangGraph interrupts for consequential approvals.
+
+This differs from a code-generating agent framework: MLZero's research implementation can generate and execute Python/Bash during iterative ML development, and its README recommends Docker isolation for that reason. This project uses constrained Python tool functions and predeclared scikit-learn pipelines. It trades open-ended task coverage for predictable, auditable behavior in a business system.
+
+## 5. LangGraph lifecycle in this code
 
 `src/agentic_ml_department/workflow.py` defines the state fields and graph nodes. The graph executes this sequence:
 
 1. `discover_sources` — list the synthetic business-system connectors and counts.
-2. `profile_data` — summarize row counts, fields, missing cells and duplicates.
-3. `propose_business_questions` — produce the business question and analysis questions.
-4. `approve_business_question` — pause using `interrupt()` and return an approval request.
-5. `train_candidate_models` — train candidate classifiers, evaluate them and queue predictions internally.
-6. `approve_model_promotion` — display metrics and pause for model approval.
-7. `promote_model` — mark the approved candidate model active.
-8. `approve_business_writeback` — display a final writeback preview and pause.
-9. `sync_predictions` — mark scores as synchronized only after approval.
-10. `measure_business_impact` — calculate business prioritization estimates.
-11. `record_learning` — store the review note for future comparison.
-12. `finish` — create a final workflow summary.
+2. `profile_data` — data-perception agent summarizes fields, distributions, missingness, duplicates and associations.
+3. `plan_ml_tasks` — task-descriptor agent creates a bounded execution plan.
+4. `select_allowed_tools` — tool-selector agent lists only explicitly registered capabilities.
+5. `propose_business_questions` — produce the business question and analysis questions.
+6. `approve_business_question` — pause using `interrupt()` and return an approval request.
+7. `train_candidate_models` — train candidate classifiers, evaluate them and queue predictions internally.
+8. `approve_model_promotion` — independent reviewer checks evidence, then the graph pauses for human model approval.
+9. `promote_model` — mark the approved candidate model active.
+10. `approve_business_writeback` — display a final writeback preview and pause.
+11. `sync_predictions` — mark scores as synchronized only after approval.
+12. `measure_business_impact` — calculate business prioritization estimates.
+13. `record_learning` — store the review note for future comparison.
+14. `finish` — create a final workflow summary.
 
 When a node calls `interrupt(value)`, LangGraph persists the graph checkpoint and pauses execution. The API later resumes the same thread with `Command(resume=decision)`. The approval decision is data supplied by the user, not an instruction generated by the model.
 

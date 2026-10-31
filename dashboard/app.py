@@ -86,6 +86,13 @@ else:
         proposal = approval.get("proposal", {})
         st.write(f"**Business objective:** {proposal.get('objective_label', run['objective'])}")
         st.write(proposal.get("data_note", ""))
+        if proposal.get("task_plan"):
+            with st.expander("Agent-generated execution plan", expanded=True):
+                st.write(proposal["task_plan"].get("business_value", ""))
+                st.dataframe(proposal["task_plan"].get("steps", []), use_container_width=True, hide_index=True)
+        if proposal.get("selected_tools"):
+            with st.expander("Allow-listed tools selected for this workflow"):
+                st.dataframe(proposal["selected_tools"], use_container_width=True, hide_index=True)
         for q in proposal.get("questions", []):
             st.markdown(f"**{q['question']}**\n\n{q['business_reason']}")
         if proposal.get("llm_advice"):
@@ -104,6 +111,9 @@ else:
         if candidate.get("supervisor_controls_applied"):
             st.json(candidate["supervisor_controls_applied"])
         st.caption(candidate.get("evaluation_note", ""))
+        if approval.get("automated_review"):
+            st.write("Independent automated reviewer")
+            st.json(approval["automated_review"])
         if candidate.get("feature_importance"):
             st.write("Most influential model inputs (association, not proof of causation)")
             st.dataframe(candidate["feature_importance"], use_container_width=True, hide_index=True)
@@ -134,7 +144,19 @@ else:
             st.rerun()
 
 st.divider()
-st.header("4. Run history and business value")
+st.header("4. Agent activity and run history")
+if runs:
+    selected_completed = st.selectbox("Inspect run details", [r["run_id"] for r in runs], format_func=lambda x: x[:8])
+    details = api("GET", f"/api/runs/{selected_completed}")
+    if details:
+        trace = details.get("state", {}).get("agent_trace", [])
+        if trace:
+            st.write("Specialist-agent execution trace")
+            st.dataframe(trace, use_container_width=True, hide_index=True)
+        task_plan = details.get("state", {}).get("task_plan")
+        if task_plan:
+            with st.expander("Task plan"):
+                st.json(task_plan)
 if runs:
     st.dataframe([{"run": r["run_id"][:8], "objective": r["objective"], "status": r["status"], "stage": r["stage"], "created": r["created_at"]} for r in runs], use_container_width=True, hide_index=True)
 reviews = api("GET", "/api/business-reviews?limit=10") or []
@@ -143,7 +165,7 @@ for review in reviews:
         st.json(review["impact"])
         st.write(review["learning_note"])
 
-st.subheader("5. Record a verified outcome")
+st.subheader("6. Record a verified outcome")
 st.caption("This is how a future training run can learn from a corrected label. Only record an outcome that has actually been checked.")
 predictions = api("GET", "/api/predictions?limit=1000") or []
 synced_predictions = [p for p in predictions if p["status"] == "SYNCED"]

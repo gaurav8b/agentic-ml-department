@@ -11,9 +11,19 @@ from agentic_ml_department.modeling import train_and_score, load_objective_frame
 
 @pytest.fixture(scope="module", autouse=True)
 def seeded_database():
+    # Tests use an isolated database and clean model artifacts so repeated local runs are deterministic.
+    from agentic_ml_department.config import settings
+    from pathlib import Path
+    import shutil
+
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    if settings.model_artifact_dir.exists():
+        for artifact in settings.model_artifact_dir.glob("*.joblib"):
+            artifact.unlink(missing_ok=True)
     seed_demo_data(force=True)
     yield
+    Base.metadata.drop_all(bind=engine)
 
 
 def test_synthetic_company_has_five_sources_and_expected_volume():
@@ -105,3 +115,45 @@ def test_business_impact_uses_the_supervisor_approved_prediction_threshold():
     impact = calculate_business_impact("pytest-threshold-impact", "customer_churn")
     assert impact["high_risk_customers"] == 1
     assert impact["estimated_monthly_revenue_at_risk_usd"] == round(expected_monthly_spend, 2)
+
+
+def test_agent_roles_produce_auditable_task_plan_and_select_allowlisted_tools():
+    from agentic_ml_department.agents import (
+        run_data_perception, run_task_planner, run_tool_selector, run_reviewer,
+    )
+    from agentic_ml_department.tool_registry import build_default_registry
+
+    profiles = business_system_summary()["profiles"]
+    perceived = run_data_perception(profiles)
+    plan = run_task_planner("customer_churn", perceived["profiles"], "Prioritize recall")
+    tools = run_tool_selector("customer_churn", build_default_registry())
+
+    assert perceived["trace"]["agent"] == "data_perception_agent"
+    assert plan["trace"]["agent"] == "task_descriptor_agent"
+    assert len(plan["plan"]["steps"]) == 6
+    assert tools["trace"]["agent"] == "tool_selector_agent"
+    assert {t["name"] for t in tools["selected_tools"]} == {
+        "discover_business_systems", "create_training_candidate", "sync_approved_predictions"
+    }
+    assert next(t for t in tools["selected_tools"] if t["name"] == "sync_approved_predictions")["requires_human_approval"] is True
+
+
+def test_tool_registry_denies_unapproved_writeback():
+    from agentic_ml_department.tool_registry import build_default_registry
+
+    registry = build_default_registry()
+    with pytest.raises(PermissionError, match="requires explicit human approval"):
+        registry.invoke("sync_approved_predictions", run_id="no-write")
+    with pytest.raises(KeyError, match="not allow-listed"):
+        registry.invoke("run_arbitrary_shell", command="echo unsafe")
+
+
+def test_reviewer_requires_holdout_and_distinct_scoring_cohort():
+    from agentic_ml_department.agents import run_reviewer
+
+    reviewed = run_reviewer({"metrics": {"rows_evaluated": 100, "rows_available": 500, "rows_scored": 200},
+                             "artifact_path": "model.joblib"}, True)
+    assert reviewed["review"]["passed"] is True
+    failed = run_reviewer({"metrics": {"rows_evaluated": 0, "rows_available": 500, "rows_scored": 200},
+                           "artifact_path": "model.joblib"}, True)
+    assert failed["review"]["passed"] is False

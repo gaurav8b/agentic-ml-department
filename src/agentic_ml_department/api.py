@@ -18,6 +18,7 @@ from .modeling import OBJECTIVES
 from .models import Base, BusinessReview, Campaign, Customer, Lead, ModelRecord, OutcomeFeedback, Prediction, SalesOrder, SupervisorInstruction, SupportTicket, WorkflowRecord
 from .seed import COMPANY_NAME, seed_demo_data
 from .workflow import run_graph_resume, run_graph_start
+from .tool_registry import build_default_registry
 
 app = FastAPI(
     title="Agentic ML Department API",
@@ -127,6 +128,25 @@ def get_systems():
 @app.get("/api/profiles")
 def get_profiles():
     return business_system_summary()
+
+
+@app.get("/api/agent-team")
+def get_agent_team():
+    """Describe the specialist agents and allow-listed tools in the demo."""
+    return {
+        "agents": [
+            {"name": "data_perception_agent", "purpose": "Profile source tables and flag data-quality concerns."},
+            {"name": "task_descriptor_agent", "purpose": "Translate the approved objective into a bounded, auditable task plan."},
+            {"name": "tool_selector_agent", "purpose": "Select tools from the explicit Python allow-list."},
+            {"name": "business_question_agent", "purpose": "Propose testable questions and business rationale."},
+            {"name": "ml_execution_agent", "purpose": "Train approved fixed baseline pipelines and score the current cohort."},
+            {"name": "model_review_agent", "purpose": "Check evaluation evidence before human model-promotion approval."},
+            {"name": "business_integration_agent", "purpose": "Prepare the writeback preview; the supervisor decides whether to authorize it."},
+            {"name": "business_feedback_agent", "purpose": "Record verified outcomes and create learning notes for later runs."},
+        ],
+        "tools": build_default_registry().describe(),
+        "execution_policy": "No arbitrary generated Python or shell is executed. Business writeback is a separate human-approved action.",
+    }
 
 
 @app.post("/api/demo/seed")

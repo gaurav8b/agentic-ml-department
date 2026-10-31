@@ -180,3 +180,43 @@ Do not expose a tool to an agent simply because an integration library supports 
 - [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
 - [LangChain overview](https://docs.langchain.com/oss/python/langchain/overview)
 - [LangChain Ollama integration](https://python.langchain.com/docs/integrations/chat/ollama/)
+
+
+## 12. Why this project now has specialist Python agents
+
+A useful reference is [AutoGluon Assistant (MLZero)](https://github.com/gaurav8b/autogluon-assistant), which has distinct Python agents for data perception, task description, tool selection, code generation, execution and error analysis, plus a manager that iterates across candidate solutions. It also provides CLI, Python API, Web UI and MCP interfaces. Its `pyproject.toml` declares both `langgraph` and `langchain`.
+
+We adapt the role separation that fits a supervised business ML department:
+
+- `agents.run_data_perception` inspects the data profiles and flags material missingness.
+- `agents.run_task_planner` builds a six-stage business plan, including the three approval points.
+- `agents.run_tool_selector` picks only the tools defined in `tool_registry.py`.
+- `agents.run_reviewer` checks that there is a holdout evaluation, a historical training cohort, a separate current scoring population, an artifact reference and a passing quality gate.
+- `workflow.py` records the agent trace so a user can see what each specialist did.
+
+The system deliberately does **not** implement a free-form code-generation/execution loop. MLZero documents Python and Bash generation/execution and recommends Docker isolation. For this prototype, generated code would make a business connector too powerful and would make it harder to verify exactly what action an agent can take. The ML operations therefore run through known Python functions and scikit-learn pipelines.
+
+## 13. Inspect the team and run from Python
+
+The team and its registered tools are visible at `GET /api/agent-team`. The Streamlit dashboard shows the task plan, selected tool list, model review and per-run agent trace.
+
+Command-line usage:
+
+```bash
+agentic-ml profile
+agentic-ml run --objective customer_churn --instructions "Prioritize recall"
+```
+
+Python usage (from an installed project environment):
+
+```python
+from agentic_ml_department.agents import run_data_perception, run_task_planner
+from agentic_ml_department.connectors import business_system_summary
+
+profiles = business_system_summary()["profiles"]
+perception = run_data_perception(profiles)
+plan = run_task_planner("customer_churn", perception["profiles"], "Prioritize recall")
+print(plan["plan"])
+```
+
+The tool registry validates required and unexpected arguments, rejects unknown tool names and prevents a write-capable tool from running unless explicit approval is supplied. The registry is a first capability-control layer; a production deployment must also enforce identity, permissions and network/data scopes at the service boundary.

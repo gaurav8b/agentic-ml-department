@@ -19,6 +19,8 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command, interrupt
 
 from .advisor import build_business_questions
+from .agents import run_data_perception, run_task_planner, run_tool_selector, run_reviewer
+from .tool_registry import build_default_registry
 from .config import settings
 from .connectors import business_system_summary
 from .db import SessionLocal
@@ -33,6 +35,10 @@ class MLDepartmentState(TypedDict, total=False):
     supervisor_instructions: str
     business_snapshot: dict
     data_profiles: list[dict]
+    agent_trace: list[dict]
+    task_plan: dict
+    selected_tools: list[dict]
+    review_result: dict
     business_question_proposal: dict
     question_approval: dict
     model_result: dict
@@ -57,11 +63,26 @@ def _discover(state: MLDepartmentState) -> dict:
 
 
 def _profile(state: MLDepartmentState) -> dict:
-    """Create data-quality and schema summaries before proposing a target."""
+    """Data-perception agent: summarize quality, schema and analytical affordances."""
     snapshot = state.get("business_snapshot", {})
     profiles = snapshot.get("profiles", [])
-    compact = [{k: p.get(k) for k in ("source", "rows", "columns", "missing_cells", "duplicate_rows")} for p in profiles]
-    return {"data_profiles": compact}
+    perception = run_data_perception(profiles)
+    return {"data_profiles": perception["profiles"], "agent_trace": state.get("agent_trace", []) + [perception["trace"]]}
+
+
+def _plan_tasks(state: MLDepartmentState) -> dict:
+    """Task-descriptor agent: create an auditable plan from the approved objective."""
+    plan = run_task_planner(state["objective"], state.get("data_profiles", []),
+                            state.get("supervisor_instructions", ""))
+    return {"task_plan": plan["plan"], "agent_trace": state.get("agent_trace", []) + [plan["trace"]]}
+
+
+def _select_tools(state: MLDepartmentState) -> dict:
+    """Tool-selector agent: select only pre-registered, allow-listed Python tools."""
+    registry = build_default_registry()
+    selection = run_tool_selector(state["objective"], registry)
+    return {"selected_tools": selection["selected_tools"],
+            "agent_trace": state.get("agent_trace", []) + [selection["trace"]]}
 
 
 def _propose_questions(state: MLDepartmentState) -> dict:
@@ -69,6 +90,8 @@ def _propose_questions(state: MLDepartmentState) -> dict:
         state["objective"], state.get("business_snapshot", {}).get("profiles", []),
         state.get("supervisor_instructions", ""),
     )
+    proposal["task_plan"] = state.get("task_plan", {})
+    proposal["selected_tools"] = state.get("selected_tools", [])
     return {"business_question_proposal": proposal}
 
 
@@ -93,7 +116,12 @@ def _train(state: MLDepartmentState) -> dict:
     approval_comments = state.get("question_approval", {}).get("comments", "")
     combined_instruction = "\n".join(x for x in (initial_instruction, approval_comments) if x.strip())
     result = train_and_score(state["objective"], state["run_id"], combined_instruction)
-    return {"model_result": result}
+    return {"model_result": result,
+            "agent_trace": state.get("agent_trace", []) + [{
+                "agent": "ml_execution_agent", "status": "completed",
+                "summary": f"Trained {len(result.get('metrics', {}).get('model_candidates', []))} candidate pipelines and scored {result.get('predictions_queued', 0)} records.",
+                "artifact": result.get("artifact_path"),
+            }]}
 
 
 def _model_gate(state: MLDepartmentState) -> dict:
@@ -103,6 +131,7 @@ def _model_gate(state: MLDepartmentState) -> dict:
     enough_data = metrics.get("rows_available", 0) >= OBJECTIVES[state["objective"]]["minimum_rows"]
     auc = metrics.get("roc_auc", 0.0)
     quality_passed = bool(enough_data and auc >= 0.60)
+    review = run_reviewer(result, quality_passed)
     answer = interrupt({
         "approval_type": "model_promotion",
         "title": "Review the candidate model",
@@ -114,14 +143,19 @@ def _model_gate(state: MLDepartmentState) -> dict:
             "minimum_roc_auc": 0.60,
             "message": "The prototype's minimum quality rule passed." if quality_passed else "The candidate is below the demo quality bar. Reject it or provide a documented override reason.",
         },
+        "automated_review": review["review"],
         "risk": "The model has only been evaluated on synthetic data. Approval does not authorize real-money or high-impact automated decisions.",
     })
-    return {"model_approval": {**answer, "quality_gate_passed": quality_passed}}
+    return {"model_approval": {**answer, "quality_gate_passed": quality_passed},
+            "review_result": review["review"],
+            "agent_trace": state.get("agent_trace", []) + [review["trace"]]}
 
 
 def _route_model(state: MLDepartmentState) -> str:
     decision = state.get("model_approval", {})
     if not decision.get("approved"):
+        return "stop"
+    if not state.get("review_result", {}).get("passed", False):
         return "stop"
     quality_passed = decision.get("quality_gate_passed", False)
     override = str(decision.get("comments", "")).strip()
@@ -200,6 +234,9 @@ def _finish(state: MLDepartmentState) -> dict:
         "business_impact": state.get("business_impact", {}),
         "writeback": state.get("writeback_result", {}),
         "learning_note": state.get("learning_note", ""),
+        "agent_trace": state.get("agent_trace", []),
+        "task_plan": state.get("task_plan", {}),
+        "review_result": state.get("review_result", {}),
         "human_approvals": {
             "business_question": state.get("question_approval", {}).get("approved", False),
             "model_promotion": state.get("model_approval", {}).get("approved", False),
@@ -224,6 +261,8 @@ def build_graph():
     graph = StateGraph(MLDepartmentState)
     graph.add_node("discover_sources", _discover)
     graph.add_node("profile_data", _profile)
+    graph.add_node("plan_ml_tasks", _plan_tasks)
+    graph.add_node("select_allowed_tools", _select_tools)
     graph.add_node("propose_business_questions", _propose_questions)
     graph.add_node("approve_business_question", _question_gate)
     graph.add_node("train_candidate_models", _train)
@@ -239,7 +278,9 @@ def build_graph():
 
     graph.add_edge(START, "discover_sources")
     graph.add_edge("discover_sources", "profile_data")
-    graph.add_edge("profile_data", "propose_business_questions")
+    graph.add_edge("profile_data", "plan_ml_tasks")
+    graph.add_edge("plan_ml_tasks", "select_allowed_tools")
+    graph.add_edge("select_allowed_tools", "propose_business_questions")
     graph.add_edge("propose_business_questions", "approve_business_question")
     graph.add_conditional_edges("approve_business_question", _route_question,
                                 {"train": "train_candidate_models", "stop": "stop"})
