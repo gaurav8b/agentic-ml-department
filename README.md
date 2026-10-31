@@ -43,7 +43,6 @@ git clone https://github.com/gaurav8b/agentic-ml-department.git
 cd agentic-ml-department
 ```
 
-Replace the placeholder account name with the account that owns the repository.
 
 ### Step 3 — Create your local settings file
 
