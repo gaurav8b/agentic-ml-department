@@ -41,9 +41,6 @@ jobs:
               cp "$source_dir/$file" .
             fi
           done
-          if [ -f "$source_dir/.github/workflows/tests.yml" ]; then
-            cp "$source_dir/.github/workflows/tests.yml" .github/workflows/tests.yml
-          fi
           rm -rf "$temp_dir"
 
       - name: Set up Python
@@ -58,18 +55,20 @@ jobs:
           pip install -r requirements.txt
           pip install -e .
 
-      - name: Compile and test the published source tree
+      - name: Compile and test the extracted source
         run: |
           python -m compileall -q src tests dashboard scripts
           pytest -q
 
-      - name: Commit the readable project files to main
+      - name: Commit readable project files
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf src/*.egg-info .pytest_cache
+          find src tests dashboard scripts -type d -name __pycache__ -prune -exec rm -rf {} +
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md .env.example Dockerfile docker-compose.yml pyproject.toml requirements.txt Makefile LICENSE .gitignore .dockerignore src tests dashboard scripts docs .github/workflows/tests.yml
+          git add README.md .env.example Dockerfile docker-compose.yml pyproject.toml requirements.txt Makefile LICENSE .gitignore .dockerignore src tests dashboard scripts docs
           if git diff --cached --quiet; then
             echo "The source tree is already published."
           else
