@@ -1,8 +1,8 @@
-# Source bundle
+# Source archive
 
-The complete project source and all documentation are stored as 14 numbered base64 text shards in `parts/`. The repository's extraction helpers reconstruct the archive and verify its SHA-256 checksum before extraction.
+The complete project source and all documentation are stored in `agentic-ml-department-source.tar.xz`.
 
-Run from the repository root:
+The repository-root extraction helpers verify its SHA-256 checksum before extracting:
 
 - Linux/macOS: `bash extract-source.sh`
 - Windows PowerShell: `.\extract-source.ps1`

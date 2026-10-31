@@ -1,16 +1,10 @@
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$PartsDirectory = Join-Path $Root ".source/parts"
 $Archive = Join-Path $Root ".source/agentic-ml-department-source.tar.xz"
 
-$Parts = Get-ChildItem -Path $PartsDirectory -Filter "*.b64" | Sort-Object Name
-if ($Parts.Count -ne 14) {
-  throw "Expected 14 numbered archive parts under .source/parts; found $($Parts.Count)."
+if (-not (Test-Path $Archive)) {
+  throw "Missing source archive: $Archive"
 }
-
-$Base64 = ($Parts | ForEach-Object { (Get-Content -Path $_.FullName -Raw).Trim() }) -join ""
-$Bytes = [Convert]::FromBase64String($Base64)
-[IO.File]::WriteAllBytes($Archive, $Bytes)
 
 Push-Location $Root
 try {

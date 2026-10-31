@@ -11,10 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Reconstruct source archive
+      - name: Verify source archive
         run: |
-          test "$(find .source/parts -maxdepth 1 -name '*.b64' | wc -l)" -eq 14
-          cat .source/parts/*.b64 | tr -d '\r\n ' | base64 -d > .source/agentic-ml-department-source.tar.xz
+          test -s .source/agentic-ml-department-source.tar.xz
           sha256sum -c CHECKSUMS.txt
       - name: Extract project
         run: tar -xJf .source/agentic-ml-department-source.tar.xz

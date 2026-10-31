@@ -22,7 +22,7 @@ Copy-Item .env.example .env
 docker compose up --build -d
 ```
 
-The helpers reconstruct and checksum-verify the compressed source bundle from the numbered base64 parts under `.source/parts/`, then extract the full project. You do not need to manually assemble the parts.
+The helpers checksum-verify and extract the complete compressed source archive stored in `.source/agentic-ml-department-source.tar.xz`. You do not need to manually assemble or download separate files.
 
 Open the business control room at http://localhost:8501, API documentation at http://localhost:8000/docs, and MLflow at http://localhost:5000.
 
