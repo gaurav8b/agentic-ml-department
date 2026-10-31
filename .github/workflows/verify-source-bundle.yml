@@ -11,23 +11,43 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Reconstruct staged archive when a source refresh is in progress
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d .source/chunks ]; then
+            cat .source/chunks/part-*.b64 | base64 --decode > .source/agentic-ml-department-source.tar.xz
+          fi
       - name: Verify source archive
         run: |
           test -s .source/agentic-ml-department-source.tar.xz
           sha256sum -c CHECKSUMS.txt
       - name: Extract project
-        run: tar -xJf .source/agentic-ml-department-source.tar.xz
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/agentic-ml-source"
+          tar -xJf .source/agentic-ml-department-source.tar.xz -C "$RUNNER_TEMP/agentic-ml-source"
+          if [ -d "$RUNNER_TEMP/agentic-ml-source/agentic-ml-department/src" ]; then
+            echo "PROJECT_DIR=$RUNNER_TEMP/agentic-ml-source/agentic-ml-department" >> "$GITHUB_ENV"
+          elif [ -d "$RUNNER_TEMP/agentic-ml-source/src" ]; then
+            echo "PROJECT_DIR=$RUNNER_TEMP/agentic-ml-source" >> "$GITHUB_ENV"
+          else
+            echo "Source archive does not contain the expected project tree."
+            exit 1
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Install test dependencies
-        working-directory: agentic-ml-department
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest
+          pip install -e .
       - name: Compile Python sources
-        working-directory: agentic-ml-department
+        working-directory: ${{ env.PROJECT_DIR }}
         run: python -m compileall -q src tests dashboard scripts
       - name: Run tests
-        working-directory: agentic-ml-department
+        working-directory: ${{ env.PROJECT_DIR }}
         run: pytest -q
